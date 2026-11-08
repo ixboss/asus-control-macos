@@ -1,0 +1,41 @@
+# .gitignore for asus-control-macos
+
+# Xcode & Swift Package Manager
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+*.xcuserstate
+
+# Compiled Binaries & Packages
+build/
+dist/
+*.o
+*.d
+*.dia
+*.swiftdeps
+*.swiftmodule
+*.pcm
+*.dSYM/
+*.bundle/
+*.kext/
+*.dmg
+*.zip
+*.tar.gz
+
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Configuration & Logs (Runtime state)
+bridge.log
+*.log
+scratch/
+tmp/
+*.swp
+*~
