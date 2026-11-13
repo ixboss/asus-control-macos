@@ -80,7 +80,7 @@ public struct CapabilityMatrixResolver: Sendable {
         }
 
         // Tier 2a: TUF Gaming A17/F15 (FA507/FX507 share the ATKD WMNB interface and thermal/curve selectors)
-        if board.hasPrefix("FA507") || board.hasPrefix("FX507") || system.hasPrefix("FA507") || system.hasPrefix("FX507") {
+        if board.hasPrefix("FA507") || board.hasPrefix("FX507") || system.contains("FA507") || system.contains("FX507") {
             return ASUSModelProfile(
                 boardProduct: boardProduct,
                 family: "TUF Gaming A15/F15 (FA507/FX507)",
@@ -97,7 +97,7 @@ public struct CapabilityMatrixResolver: Sendable {
 
         // Tier 2b: ROG Strix / Zephyrus (G513/G713/GA402/GA503/GU603/GU502 etc.)
         let rogPrefixes = ["G513", "G713", "GA402", "GA503", "GU603", "GU502", "GV301", "GX650", "FA507N"]
-        if rogPrefixes.contains(where: { board.hasPrefix($0) || system.hasPrefix($0) }) {
+        if rogPrefixes.contains(where: { board.hasPrefix($0) || system.contains($0) }) {
             return ASUSModelProfile(
                 boardProduct: boardProduct,
                 family: "ROG Zephyrus / Strix",
