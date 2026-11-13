@@ -125,7 +125,7 @@ struct AsusCtlDaemonMain {
             let onAC = inspector?.inspectBattery().externalConnected ?? true
             handlePowerSourceChange(onAC: onAC)
         }
-        DistributedNotificationCenter.default.addObserver(
+        DistributedNotificationCenter.default().addObserver(
             ipcRelay,
             selector: #selector(SettingsChangeRelay.settingsChanged(_:)),
             name: Notification.Name(SettingsStore.settingsChangedNotification),

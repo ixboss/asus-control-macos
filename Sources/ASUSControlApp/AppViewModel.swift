@@ -63,7 +63,7 @@ public final class AppViewModel: ObservableObject {
         ipcRelay.rebind { [weak self] in
             Task { @MainActor in self?.refreshTelemetry() }
         }
-        DistributedNotificationCenter.default.addObserver(
+        DistributedNotificationCenter.default().addObserver(
             ipcRelay,
             selector: #selector(SettingsChangeRelay.settingsChanged(_:)),
             name: Notification.Name(SettingsStore.settingsChangedNotification),

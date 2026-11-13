@@ -129,19 +129,18 @@ public final class SettingsStore: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let encoded = encoder.encode(settings)
+        let encoded = try? encoder.encode(settings)
         try? encoded?.write(to: configFileURL, options: .atomic)
         lock.unlock()
 
         // Live IPC: notify CLI / app / daemon that settings changed (only for real user-facing stores)
-        if encoded != nil && isUserFacingStore {
-            DistributedNotificationCenter.default().post(
-                name: Notification.Name(Self.settingsChangedNotification),
-                object: nil,
-                userInfo: nil,
-                deliverImmediately: true
-            )
-        }
+        guard encoded != nil, isUserFacingStore else { return }
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name(Self.settingsChangedNotification),
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
     }
 
     /// True when this store points at the shared user config (not a temp/test file).
