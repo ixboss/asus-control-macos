@@ -96,8 +96,7 @@ struct AsusCtlDaemonMain {
         // (IOKit.ps) — instant, zero idle CPU wakeups (replaces 0.5 s polling)
         // --------------------------------------------------------------------
         let initialOnAC = inspector.inspectBattery().externalConnected
-        let powerBox = Unmanaged.passRetained(EventBox { [weak inspector] in
-            guard let inspector else { return }
+        let powerBox = Unmanaged.passRetained(EventBox { [inspector] in
             let onAC = inspector.inspectBattery().externalConnected
             handlePowerSourceChange(onAC: onAC)
         }).toOpaque()
@@ -119,10 +118,10 @@ struct AsusCtlDaemonMain {
         // mirror the settings file so all three processes agree instantly.
         // --------------------------------------------------------------------
         let ipcRelay = SettingsChangeRelay()
-        ipcRelay.rebind { [weak inspector] in
+        ipcRelay.rebind { [inspector] in
             let s = SettingsStore.shared.load()
             log("Settings changed externally (org.asuscontrol.settingsChanged): ChargeLimit=\(s.batteryChargeLimitPercent)%, Profile=\(s.thermalProfile.displayName), AutoSwitch=\(s.autoSwitchProfileOnPowerChange)")
-            let onAC = inspector?.inspectBattery().externalConnected ?? true
+            let onAC = inspector.inspectBattery().externalConnected
             handlePowerSourceChange(onAC: onAC)
         }
         DistributedNotificationCenter.default().addObserver(
