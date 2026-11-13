@@ -58,6 +58,10 @@ let package = Package(
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("AppKit")
             ]
+        ),
+        .testTarget(
+            name: "ASUSControlCoreTests",
+            dependencies: ["ASUSControlCore"]
         )
     ]
 )

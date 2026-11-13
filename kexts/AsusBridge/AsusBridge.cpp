@@ -21,6 +21,7 @@
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/acpi/IOACPIPlatformDevice.h>
 #include <kern/thread_call.h>
+#include <pexpert/pexpert.h>
 #include <stdarg.h>
 #include <string.h>
 #include "asus_bridge_abi.h"
@@ -774,16 +775,66 @@ public:
 
 private:
     AsusBridge *bridge = nullptr;
-    bool isAuthorized = false;
+    bool isAdmin_ = false;
+    bool allowUserWrites_ = false;
+    uint64_t lastWriteUptimeNs = 0;
+
+    bool isReadOnlySelector(uint32_t selector) const;
+    bool hasWritePrivilege() const;
+    IOReturn checkWriteRateLimit();
 };
 
 OSDefineMetaClassAndStructors(AsusBridgeUserClient, IOUserClient)
 
+// Read-only selectors (safe for any local user process): telemetry, capability
+// queries, version checks, and firmware curve reads. All DEVS-style writes are
+// privileged operations and additionally rate-limited.
+bool AsusBridgeUserClient::isReadOnlySelector(uint32_t selector) const
+{
+    switch (selector) {
+    case kAsusBridgeSelectorGetSnapshot:
+    case kAsusBridgeSelectorReadFanCurve:
+    case kAsusBridgeSelectorReadSingleDSTS:
+    case kAsusBridgeSelectorGetECState:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Write privilege: explicit admin/root client, or the opt-in boot-arg
+// `asusbridge_allow_user_writes` (default 1 for single-user Hackintosh setups
+// where asusctld runs as a LaunchAgent). Set `asusbridge_allow_user_writes=0`
+// in boot-args to enforce admin-only writes strictly.
+bool AsusBridgeUserClient::hasWritePrivilege() const
+{
+    if (isAdmin_) return true;
+    uint32_t allowVal = 1;
+    if (PE_parse_boot_argn("asusbridge_allow_user_writes", &allowVal, sizeof(allowVal))) {
+        return allowVal != 0;
+    }
+    return true; // boot-arg absent -> default enabled (Hackintosh LaunchAgent compatibility)
+}
+
+// Strict input-buffer validation happens per-selector below; this additionally
+// rate-limits mutating hardware calls to at most one per 100 ms per client.
+IOReturn AsusBridgeUserClient::checkWriteRateLimit()
+{
+    uint64_t secs = 0, nanos = 0;
+    clock_get_system_nanotime((clock_sec_t *)&secs, (clock_nsec_t *)&nanos);
+    uint64_t nowNs = secs * 1000000000ull + nanos;
+    if (lastWriteUptimeNs != 0 && nowNs < lastWriteUptimeNs + 100ull * 1000000ull) {
+        return kIOReturnBusy;
+    }
+    lastWriteUptimeNs = nowNs;
+    return kIOReturnSuccess;
+}
+
 bool AsusBridgeUserClient::initWithTask(task_t owningTask, void *securityToken, UInt32 type, OSDictionary *properties)
 {
     if (!IOUserClient::initWithTask(owningTask, securityToken, type, properties)) return false;
-    isAuthorized = (clientHasPrivilege(owningTask, kIOClientPrivilegeAdministrator) == kIOReturnSuccess) ||
-                   (clientHasPrivilege(owningTask, kIOClientPrivilegeLocalUser) == kIOReturnSuccess);
+    isAdmin_ = (clientHasPrivilege(owningTask, kIOClientPrivilegeAdministrator) == kIOReturnSuccess);
+    allowUserWrites_ = hasWritePrivilege();
     return true;
 }
 
@@ -803,7 +854,16 @@ IOReturn AsusBridgeUserClient::externalMethod(uint32_t selector, IOExternalMetho
                                               IOExternalMethodDispatch *, OSObject *, void *)
 {
     if (!bridge || !args || !bridge->lock) return kIOReturnNotAttached;
-    if (!isAuthorized) return kIOReturnNotPrivileged;
+
+    // Privilege boundary: read-only telemetry for any local user process;
+    // hardware writes require admin/root (or the default-enabled opt-in boot-arg).
+    if (!isReadOnlySelector(selector) && !allowUserWrites_) {
+        return kIOReturnNotPrivileged;
+    }
+    if (!isReadOnlySelector(selector)) {
+        IOReturn rl = checkWriteRateLimit();
+        if (rl != kIOReturnSuccess) return rl;
+    }
 
     switch (selector) {
     case kAsusBridgeSelectorGetSnapshot: {

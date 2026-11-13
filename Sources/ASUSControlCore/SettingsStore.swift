@@ -74,9 +74,30 @@ public struct ASUSControlSettings: Codable, Sendable, Equatable {
     }
 }
 
+/// Selector-based relay for `DistributedNotificationCenter` (which has no
+/// block-based observer API). Delivered on a background notification thread;
+/// handlers must be thread-safe (`SettingsStore` / `AsusBridgeClient` are).
+public final class SettingsChangeRelay: NSObject {
+    private var onChange: () -> Void = {}
+
+    public override init() {}
+
+    public func rebind(_ handler: @escaping () -> Void) {
+        onChange = handler
+    }
+
+    @objc public func settingsChanged(_ note: Notification) {
+        onChange()
+    }
+}
+
 /// Thread-safe JSON store for reading/writing `ASUSControlSettings` and applying them to `AsusBridge.kext`.
 public final class SettingsStore: @unchecked Sendable {
     public static let shared = SettingsStore()
+
+    /// DistributedNotification name posted (coalescing) after every atomic save so
+    /// `asusctl`, `asusctld`, and `ASUSControlApp` stay in live sync.
+    public static let settingsChangedNotification = "org.asuscontrol.settingsChanged"
 
     private let lock = NSLock()
     public let configFileURL: URL
@@ -104,14 +125,28 @@ public final class SettingsStore: @unchecked Sendable {
 
     public func save(_ settings: ASUSControlSettings) {
         lock.lock()
-        defer { lock.unlock() }
         let dir = configFileURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(settings) {
-            try? data.write(to: configFileURL, options: .atomic)
+        let encoded = encoder.encode(settings)
+        try? encoded?.write(to: configFileURL, options: .atomic)
+        lock.unlock()
+
+        // Live IPC: notify CLI / app / daemon that settings changed (only for real user-facing stores)
+        if encoded != nil && isUserFacingStore {
+            DistributedNotificationCenter.default().post(
+                name: Notification.Name(Self.settingsChangedNotification),
+                object: nil,
+                userInfo: nil,
+                deliverImmediately: true
+            )
         }
+    }
+
+    /// True when this store points at the shared user config (not a temp/test file).
+    private var isUserFacingStore: Bool {
+        configFileURL.path.contains(".config/asus-control")
     }
 
     @discardableResult

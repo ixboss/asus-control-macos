@@ -48,6 +48,17 @@ Support for other ASUS ROG Zephyrus, Strix, and TUF gaming models using the stan
 
 ---
 
+## 🆕 What's New in v0.4.0
+
+* **Kernel privilege separation (`AsusBridge.kext`):** read-only selectors (snapshot, telemetry, DSTS probes, EC state, curve reads) are available to any local user process, while all hardware writes require admin/root or the default-enabled `asusbridge_allow_user_writes` boot-arg (`=0` enforces admin-only). All write selectors are additionally rate-limited (100 ms floor) with strict buffer validation.
+* **Zero-polling daemon (`asusctld`):** AC/Battery profile switching now uses `IOPSNotificationCreateRunLoopSource` (IOKit.ps) and wake restoration uses `NSWorkspace.didWakeNotification` — instantaneous, ~0 idle CPU wakeups (replaced the 0.5 s polling timer).
+* **Live IPC sync:** `asusctl`, `asusctld`, and `ASUSControlApp` stay instantly in sync via `DistributedNotificationCenter` (`org.asuscontrol.settingsChanged`) on top of atomic `SettingsStore` persistence.
+* **Dynamic multi-model capability resolver:** board/product identity is read from `IOPlatformExpertDevice` and matched by `CapabilityMatrixResolver` — FX707ZM remains the Tier-1 verified profile; TUF `FA507`/`FX507` and ROG Zephyrus/Strix resolve to Tier-2 (pending a read-only DSTS probe); unknown boards fall back to telemetry-only with all writes disabled.
+* **Optional OpenCore helper:** `Extras/SSDT-ASUS-ATKD.dsl` (inert, reference-only) for builds whose OEM DSDT gates the ATKD WMI device.
+* **Automated unit tests:** `swift test` now runs in CI (`Tests/ASUSControlCoreTests/`) covering ABI struct layouts, fan-curve guardrails, settings serialization, and capability matching; release packages include `SHA256SUMS.txt`.
+
+---
+
 ## 🚀 Installation & Setup
 
 ### Prerequisites

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="${1:-v0.3.0}"
+VERSION="${1:-v0.4.0}"
 DIST_DIR="$ROOT_DIR/dist"
 STAGE_DIR="$DIST_DIR/ASUSControl-$VERSION"
 
@@ -101,5 +101,9 @@ echo "Creating $ZIP_NAME..."
 cd "$DIST_DIR"
 zip -rq "$ZIP_NAME" "ASUSControl-$VERSION"
 
+# 8. SHA256 checksums
+shasum -a 256 "$ZIP_NAME" > SHA256SUMS.txt
+cat SHA256SUMS.txt
+
 echo "Release package created successfully: $DIST_DIR/$ZIP_NAME"
-ls -lh "$DIST_DIR/$ZIP_NAME"
+ls -lh "$DIST_DIR/$ZIP_NAME" "$DIST_DIR/SHA256SUMS.txt"

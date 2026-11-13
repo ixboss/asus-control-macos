@@ -553,24 +553,11 @@ public struct AsusBridgeClient: Sendable {
     /// Writes a custom 8-point fan curve for `fanIndex` (0 = CPU, 1 = GPU).
     /// Validates monotonic temperatures (20..105 °C) and monotonic duties (0..100%, top point >= 40%).
     public func writeCustomFanCurve(fanIndex: Int, temperatures: [UInt8], dutiesPercent: [UInt8]) throws {
-        guard (0...1).contains(fanIndex), temperatures.count == 8, dutiesPercent.count == 8 else {
+        guard (0...1).contains(fanIndex) else {
             throw NSError(domain: "AsusBridgeClient", code: Int(kIOReturnBadArgument),
-                          userInfo: [NSLocalizedDescriptionKey: "Fan curve requires exactly 8 temperature points and 8 duty percentage points."])
+                          userInfo: [NSLocalizedDescriptionKey: "fanIndex must be 0 (CPU) or 1 (GPU)."])
         }
-        for i in 0..<8 {
-            guard (20...105).contains(temperatures[i]), dutiesPercent[i] <= 100 else {
-                throw NSError(domain: "AsusBridgeClient", code: Int(kIOReturnBadArgument),
-                              userInfo: [NSLocalizedDescriptionKey: "Point \(i + 1) out of range (Temp: 20..105°C, Duty: 0..100%)."])
-            }
-            if i > 0 && (temperatures[i] < temperatures[i - 1] || dutiesPercent[i] < dutiesPercent[i - 1]) {
-                throw NSError(domain: "AsusBridgeClient", code: Int(kIOReturnBadArgument),
-                              userInfo: [NSLocalizedDescriptionKey: "Fan curve temperatures and duties must be non-decreasing."])
-            }
-        }
-        guard dutiesPercent[7] >= 40 else {
-            throw NSError(domain: "AsusBridgeClient", code: Int(kIOReturnBadArgument),
-                          userInfo: [NSLocalizedDescriptionKey: "Safety guardrail: Point 8 duty must be at least 40%."])
-        }
+        try FanCurveValidator.validate(temperatures: temperatures, dutiesPercent: dutiesPercent)
 
         if isKextLoaded() {
             try withConnection { connect in

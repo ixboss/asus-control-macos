@@ -1,5 +1,150 @@
 import Foundation
 
+// MARK: - Dynamic Multi-Model Capability Resolver (v0.4.0)
+
+/// Verification tier assigned to an ASUS board profile.
+public enum ASUSModelTier: String, Codable, Sendable {
+    /// Fully hardware-verified on the reference host (FX707ZM, BIOS 316) — every selector probed live via DSTS.
+    case tier1Verified = "Tier 1 (Verified on FX707ZM)"
+    /// Compatible family (TUF FA507/FX507 or ROG Zephyrus/Strix) — WMI selectors expected but awaiting a live DSTS probe on this host.
+    case tier2PendingProbe = "Tier 2 (Compatible - Pending DSTS Probe)"
+    /// Unknown board — telemetry only; all control selectors disabled for safety.
+    case unknown = "Unknown Board (Telemetry Only)"
+}
+
+/// Feature flags resolved per-board by `CapabilityMatrixResolver`.
+public struct ASUSModelProfile: Codable, Sendable, Equatable {
+    public let boardProduct: String
+    public let family: String
+    public let tier: ASUSModelTier
+    public let supportsTelemetry: Bool
+    public let supportsFanCurves: Bool
+    public let supportsPowerLimits: Bool
+    public let supportsChargeLimit: Bool
+    public let supportsThermalProfiles: Bool
+    public let supportsTufRGB: Bool
+    public let supportsKeyboardBacklight: Bool
+
+    public init(
+        boardProduct: String,
+        family: String,
+        tier: ASUSModelTier,
+        supportsTelemetry: Bool = true,
+        supportsFanCurves: Bool = false,
+        supportsPowerLimits: Bool = false,
+        supportsChargeLimit: Bool = false,
+        supportsThermalProfiles: Bool = false,
+        supportsTufRGB: Bool = false,
+        supportsKeyboardBacklight: Bool = false
+    ) {
+        self.boardProduct = boardProduct
+        self.family = family
+        self.tier = tier
+        self.supportsTelemetry = supportsTelemetry
+        self.supportsFanCurves = supportsFanCurves
+        self.supportsPowerLimits = supportsPowerLimits
+        self.supportsChargeLimit = supportsChargeLimit
+        self.supportsThermalProfiles = supportsThermalProfiles
+        self.supportsTufRGB = supportsTufRGB
+        self.supportsKeyboardBacklight = supportsKeyboardBacklight
+    }
+}
+
+/// Dynamic capability resolver: matches board/product identifiers read from
+/// `IOPlatformExpertDevice` / SMC BIOS against known ASUS model families, and
+/// probes supported ATKD WMI selectors via read-only single-shot `DSTS` calls.
+/// FX707ZM remains the Tier-1 verified profile; other TUF (FA507/FX507) and
+/// ROG (Zephyrus/Strix) boards resolve to Tier-2 with writes pending probe.
+public struct CapabilityMatrixResolver: Sendable {
+    public init() {}
+
+    /// Pure board-id matcher (unit-testable; no IORegistry access).
+    public func match(boardProduct: String, systemProduct: String? = nil) -> ASUSModelProfile {
+        let board = boardProduct.uppercased()
+        let system = (systemProduct ?? "").uppercased()
+
+        // Tier 1: fully verified reference board
+        if board == "FX707ZM" || system.contains("FX707ZM") {
+            return ASUSModelProfile(
+                boardProduct: boardProduct,
+                family: "TUF Gaming F17",
+                tier: .tier1Verified,
+                supportsTelemetry: true,
+                supportsFanCurves: true,
+                supportsPowerLimits: true,
+                supportsChargeLimit: true,
+                supportsThermalProfiles: true,
+                supportsTufRGB: true,
+                supportsKeyboardBacklight: true
+            )
+        }
+
+        // Tier 2a: TUF Gaming A17/F15 (FA507/FX507 share the ATKD WMNB interface and thermal/curve selectors)
+        if board.hasPrefix("FA507") || board.hasPrefix("FX507") || system.hasPrefix("FA507") || system.hasPrefix("FX507") {
+            return ASUSModelProfile(
+                boardProduct: boardProduct,
+                family: "TUF Gaming A15/F15 (FA507/FX507)",
+                tier: .tier2PendingProbe,
+                supportsTelemetry: true,
+                supportsFanCurves: true,
+                supportsPowerLimits: true,
+                supportsChargeLimit: true,
+                supportsThermalProfiles: true,
+                supportsTufRGB: true,
+                supportsKeyboardBacklight: true
+            )
+        }
+
+        // Tier 2b: ROG Strix / Zephyrus (G513/G713/GA402/GA503/GU603/GU502 etc.)
+        let rogPrefixes = ["G513", "G713", "GA402", "GA503", "GU603", "GU502", "GV301", "GX650", "FA507N"]
+        if rogPrefixes.contains(where: { board.hasPrefix($0) || system.hasPrefix($0) }) {
+            return ASUSModelProfile(
+                boardProduct: boardProduct,
+                family: "ROG Zephyrus / Strix",
+                tier: .tier2PendingProbe,
+                supportsTelemetry: true,
+                supportsFanCurves: true,
+                supportsPowerLimits: true,
+                supportsChargeLimit: true,
+                supportsThermalProfiles: true,
+                supportsTufRGB: false, // Aura Sync uses the 0xB3/0xB4 stack — pending probe
+                supportsKeyboardBacklight: true
+            )
+        }
+
+        // Unknown board: telemetry-only, all writes disabled for safety
+        return ASUSModelProfile(boardProduct: boardProduct, family: "Unknown", tier: .unknown)
+    }
+
+    /// Live resolution on the current host via IORegistry host identity.
+    public func resolveLive(inspector: IORegistryInspector = IORegistryInspector()) -> ASUSModelProfile {
+        let host = inspector.inspectHostIdentity()
+        return match(boardProduct: host.boardProduct, systemProduct: host.systemProduct)
+    }
+
+    /// Read-only `DSTS` probe of the supported ATKD WMI selector set.
+    /// Returns `(deviceIDHex, present)` per whitelisted selector; only ever issues DSTS reads.
+    public func probeSupportedSelectors(bridge: AsusBridgeClient = AsusBridgeClient()) -> [(deviceIDHex: String, present: Bool)] {
+        let probes: [(UInt32, String)] = [
+            (0x00120094, "CPU Temperature"),
+            (0x00110013, "CPU Fan RPM"),
+            (0x00110014, "GPU Fan RPM"),
+            (0x00110024, "CPU Fan Curve"),
+            (0x00110025, "GPU Fan Curve"),
+            (0x001200A3, "CPU PL1 (SPL)"),
+            (0x001200A0, "CPU PL2 (SPPT)"),
+            (0x00120057, "Battery Charge Limit"),
+            (0x00120075, "Thermal Profile"),
+            (0x00100056, "TUF RGB"),
+            (0x0010005B, "Keyboard Backlight")
+        ]
+        return probes.compactMap { id, label in
+            guard let r = try? bridge.probeWhitelistedDSTS(deviceID: id, label: label) else { return (String(format: "0x%08X", id), false) }
+            return (r.deviceIDHex, r.presentBitSet)
+        }
+    }
+}
+
 /// Canonical hardware capability matrix for ASUS TUF Gaming F17 (FX707ZM, BIOS FX707ZM.316).
 /// Every entry is grounded in evidence collected from the current host's IORegistry and DSDT.aml / ssdt14.aml.
 public struct FX707ZMCapabilityMatrix: Sendable {
@@ -16,7 +161,20 @@ public struct FX707ZMCapabilityMatrix: Sendable {
         let hasSMKB = acpiDevices.contains { $0.name.hasPrefix("SMKB") }
         let bridgeLoaded = AsusBridgeClient().isAvailable()
 
-        return [
+        // Dynamic model resolution: prepend the board profile resolved from IOPlatformExpertDevice identity.
+        let resolved = CapabilityMatrixResolver().resolveLive()
+        var entries: [CapabilityEntry] = [
+            CapabilityEntry(
+                featureID: "model.capability.profile",
+                featureName: "ASUS Board Capability Profile (\(resolved.family))",
+                wmiDeviceIDHex: nil,
+                acpiOrECPath: "IOPlatformExpertDevice / NullMoth system-profile.json (board=\(resolved.boardProduct))",
+                verificationStatus: resolved.tier == .tier1Verified ? .verifiedOnCurrentHost : .routedViaHostSMMPendingProbe,
+                safetyProfile: .pureUserSpacePropertyRead,
+                notes: "\(resolved.tier.rawValue). \(resolved.tier == .tier2PendingProbe ? "Control selectors pending read-only DSTS probe on this host." : (resolved.tier == .unknown ? "All control writes disabled; telemetry only." : "All selectors verified via AsusBridge.kext."))"
+            )
+        ]
+        entries += [
             CapabilityEntry(
                 featureID: "battery.telemetry",
                 featureName: "Battery Telemetry (Charge, Health, Voltage, Amperage, Wattage, Temp)",
@@ -136,6 +294,7 @@ public struct FX707ZMCapabilityMatrix: Sendable {
                 notes: "Verified DSTS 0x00100056 & 0x00100057 via W15H SMM on FX707ZM (both return 0x00010000 = present)."
             )
         ]
+        return entries
     }
 
     public func captureSnapshot() -> DiagnosticSnapshot {

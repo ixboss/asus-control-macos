@@ -32,6 +32,7 @@ public final class AppViewModel: ObservableObject {
     private var refreshTimer: Timer?
     private var lastHotkeySeq: UInt32 = 0
     private var lastOnAC: Bool?
+    private let ipcRelay = SettingsChangeRelay {}
 
     public init() {
         let initialSnap = FX707ZMCapabilityMatrix().captureSnapshot()
@@ -56,6 +57,19 @@ public final class AppViewModel: ObservableObject {
         self.kernelLogText = client.readKernelLogProperty() ?? ""
         self.lastOnAC = initialSnap.battery.externalConnected
         self.lastHotkeySeq = self.bridgeSnapshot?.hotkeySequence ?? 0
+
+        // Live IPC: instantly refresh the Menu Bar / Dashboard UI when asusctl
+        // or asusctld changes settings (org.asuscontrol.settingsChanged).
+        ipcRelay.rebind { [weak self] in
+            Task { @MainActor in self?.refreshTelemetry() }
+        }
+        DistributedNotificationCenter.default.addObserver(
+            ipcRelay,
+            selector: #selector(SettingsChangeRelay.settingsChanged(_:)),
+            name: Notification.Name(SettingsStore.settingsChangedNotification),
+            object: nil,
+            suspensionBehavior: .deliverImmediately
+        )
 
         startPolling()
     }
