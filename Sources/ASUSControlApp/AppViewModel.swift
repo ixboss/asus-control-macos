@@ -32,7 +32,7 @@ public final class AppViewModel: ObservableObject {
     private var refreshTimer: Timer?
     private var lastHotkeySeq: UInt32 = 0
     private var lastOnAC: Bool?
-    private let ipcRelay = SettingsChangeRelay {}
+    private let ipcRelay = SettingsChangeRelay()
 
     public init() {
         let initialSnap = FX707ZMCapabilityMatrix().captureSnapshot()
